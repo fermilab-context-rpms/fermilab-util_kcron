@@ -2,7 +2,7 @@
 A utility for getting Kerberos credentials into non-interactive environments.
 
 This utility reduces the burden on Kerberos realm administrators while providing users with a secure way to run daemons and scheduled jobs without extracting personal credentials to a keytab.
- 
+
 It requires changes to KDC configuration. Provided KDC is properly configured, any principal `user@REALM` is able to create and destroy keytabs for principals of the form `username/cron/host.domain@REALM`
 
 This utility can also be used to run scheduled jobs under any local account `username`, even if principal `username@REALM` does not exist. This is especially useful if local account `username` is accessed by multiple users.
@@ -25,15 +25,15 @@ Setup your cron job following traditional cron rules.  A `kcron` prefix command 
 
 > `*@REALM                              acdim   *1/cron/*@REALM `
 
-Followed by any flags that meet your needs, taking into account principal and ticket lifetimes. 
+Followed by any flags that meet your needs, taking into account principal and ticket lifetimes.
 
 ## Runtime Requirements
 
   * MIT Kerberos 1.11 (or later) or Heimdal Kerberos 8 (or later)
+  * libcap - for use of system capibilities rather than suid
 
 Optional Runtime Requirements:
 
-  * libcap - for use of system capibilities rather than suid
   * libseccomp - for dropping any unused system calls
 
 You are strongly encouraged to run with SELinux or AppArmor in enforcing mode to further protect the system from unknown exploits using this binaries enhanced privilege set.
@@ -42,12 +42,12 @@ You are strongly encouraged to run with SELinux or AppArmor in enforcing mode to
 
   * CMake 3.14 or later
   * C Compiler that understand C-2011
+  * libcap headers - for use of system capibilities rather than suid
   * for manpages `asciidoc`
 
 Optional Build Requirements:
 
   * landlock headers - for filesystem level isolation
-  * libcap headers - for use of system capibilities rather than suid
   * libseccomp headers - for dropping any unused system calls
 
 You may change the `/var/kerberos/krb5/user/` to an alternate location at build time by setting `-DCLIENT_KEYTAB_DIR=/usr/local/var/kerberos/krb5/user/` on `cmake`.
@@ -63,6 +63,6 @@ You may change the `/var/kerberos/krb5/user/` to an alternate location at build 
  make test
 ```
 
-The `Makefile` is not setting either SUID or CAPIBILITIES on the binary.  This is by design.
+The `Makefile` is not setting CAPIBILITIES on the binary.  This is by design.
 
 See the [documentation](https://github.com/fermitools/kcron/tree/main/doc) folder for more information.

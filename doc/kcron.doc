@@ -48,7 +48,6 @@ Configuration can be provided in either +/etc/sysconfig/kcron+ or +~/.config/kcr
 
 == LIMITATIONS
 
-ifdef::libcap[]
 The kcron helper utilities utilize filesystem CAPABILITIES(7) stored as XATTR(7) values on the binaries.  The application will not run as expected if your system does not support them.
 
 On modern Linux systems, these are enabled by default.
@@ -56,7 +55,6 @@ On modern Linux systems, these are enabled by default.
 NFS does not support CAPABILITIES(7) nor should it.  However, if you set this SUID 'root', it will continue to work as expected.  It is a terrible idea to permit SUID applications to run SUID from network file systems.
 
 You can review them with GETCAP(8) on /usr/libexec/kcron/*
-endif::libcap[]
 
 The kcron helper utilities assume basic kerberos utilities are installed and configured on the system:
 KRB5.CONF(5)
@@ -73,13 +71,13 @@ KADMIN(1)
   Failure (usage error; configuration error; unexpected error).
 
 *2*::
-  Failure (missing utilities; insufficient permissions) 
+  Failure (missing utilities; insufficient permissions)
 
 == NOTE
 
-The use of this utility requires changes to KDC configuration. Kerberos admins should review the README file for the details. 
+The use of this utility requires changes to KDC configuration. Kerberos admins should review the README file for the details.
 
-Recent versions of kerberos (MIT 1.11+, Heimdal 8+) are able to automatically kinit against 
+Recent versions of kerberos (MIT 1.11+, Heimdal 8+) are able to automatically kinit against
 
 +/var/kerberos/krb5/user/${EUID}/client.keytab+
 

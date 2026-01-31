@@ -1,6 +1,6 @@
 /*
  *
- * A simple place where we keep our SETRLIMIT(2) calls
+ * Seccomp syscall filtering for kcron
  *
  */
 #include "autoconf.h" /* for our automatic config bits        */
@@ -41,172 +41,279 @@
 #ifndef KCRON_SECCOMP_H
 #define KCRON_SECCOMP_H 1
 
+#include <errno.h>
 #include <seccomp.h>
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <string.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #ifndef _0600
-#define _0600 S_IRUSR | S_IWUSR
+#define _0600 (S_IRUSR | S_IWUSR)
 #endif
 
+/*
+ * Set up seccomp syscall filtering.
+ *
+ * This function creates a strict allowlist of syscalls that the program
+ * is permitted to use. Any syscall not explicitly allowed will result in
+ * the process being killed (SCMP_ACT_KILL).
+ *
+ * Allowed syscalls are grouped by purpose:
+ * - Basic runtime: rt_sigreturn, brk, exit, exit_group
+ * - Identity queries: geteuid, getuid, getgid
+ * - I/O operations: write (restricted to specific fds), openat, close, fstat, fsync
+ * - File operations: stat, newfstatat, mkdir, fchown, fchmod (restricted)
+ * - Capability management: capget, capset (if capabilities enabled)
+ *
+ * Returns: 0 on success, exits on failure
+ *
+ * Security Principle: Default deny with explicit allow. If it's not in the list,
+ * it can't be used. This is defense-in-depth against exploitation.
+ */
 int set_kcron_seccomp(void) __attribute__((warn_unused_result)) __attribute__((flatten));
 int set_kcron_seccomp(void) {
+  scmp_filter_ctx ctx = NULL;
 
-  scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_KILL); /* default action: kill */
-
+  /* Create seccomp context with default action: KILL */
+  ctx = seccomp_init(SCMP_ACT_KILL);
   if (ctx == NULL) {
+    (void)fprintf(stderr, "%s: Cannot initialize seccomp context\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
-  /* Basic features */
+  /*
+   * BASIC RUNTIME SYSCALLS
+   * These are essential for program execution and cannot be avoided.
+   */
+
+  /* Signal handling - required for proper signal delivery */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'rt_sigreturn'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'rt_sigreturn': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Memory allocation - required by libc malloc/free */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'brk'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'brk': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Process termination - required for clean exit */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'exit'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'exit': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Thread group termination - required for multi-threaded libc */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'exit_group'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'exit_group': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
-  /* Permitted actions */
+  /*
+   * IDENTITY QUERY SYSCALLS
+   * These are needed to determine the calling user's identity.
+   */
+
+  /* Get effective user ID - used for keytab path construction */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(geteuid), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'geteuid'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'geteuid': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Get real user ID - used for keytab ownership */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getuid), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'getuid'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'getuid': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Get group ID - used for keytab ownership */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getgid), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'getgid'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'getgid': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
   /*
-   * STDOUT
+   * RESTRICTED OUTPUT SYSCALLS
+   * Write is only permitted to stdout (fd 1) and stderr (fd 2).
+   * This prevents writing to arbitrary file descriptors.
    */
+
+  /* Write to stdout - for printing keytab path */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1, SCMP_A0(SCMP_CMP_EQ, 1)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'write' to stdout.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'write' to stdout: %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
-  /*
-   * STDERR
-   */
+  /* Write to stderr - for error messages */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1, SCMP_A0(SCMP_CMP_EQ, 2)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'write' to stderr.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'write' to stderr: %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
   /*
-   *   Our directory handle
+   * FILE DESCRIPTOR OPERATIONS
+   * These are needed for directory and file handle management.
    */
 
+  /*
+   * Open files relative to directory fd - used for safe file creation.
+   * Note: Cannot easily restrict arguments, so this is a broader permission.
+   */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(openat), 0) != 0) {
-    /* not sure how to restrict this to the args I want */
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'openat'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'openat': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
+  /* Close directory handle (fd 3) */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 1, SCMP_A0(SCMP_CMP_EQ, 3)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'close'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'close' for fd 3: %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
   /*
-   *   Our file handle
+   * FILE HANDLE OPERATIONS
+   * These operate on the keytab file (fd 4).
    */
+
+  /* Write to keytab file (fd 4) */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1, SCMP_A0(SCMP_CMP_EQ, 4)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'write' to our file handle.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'write' to fd 4: %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Close keytab file (fd 4) */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 1, SCMP_A0(SCMP_CMP_EQ, 4)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'close'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'close' for fd 4: %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Sync keytab file to disk (fd 4) */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fsync), 1, SCMP_A0(SCMP_CMP_EQ, 4)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'fsync' on file handle.\n", __PROGRAM_NAME);
-    (void)seccomp_release(ctx);
-    exit(EXIT_FAILURE);
-  }
-  if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fchmod), 2, SCMP_A0(SCMP_CMP_EQ, 4), SCMP_A1(SCMP_CMP_EQ, _0600)) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'fchmod' for mode 0600 only.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'fsync' for fd 4: %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
   /*
-   *   General usage, not sure how to restrict these to the args I want....
+   * Set permissions on keytab file (fd 4) to 0600.
+   * Restricts to exactly mode 0600 (user read/write only).
    */
+  if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fchmod), 2, SCMP_A0(SCMP_CMP_EQ, 4), SCMP_A1(SCMP_CMP_EQ, _0600)) != 0) {
+    (void)fprintf(stderr, "%s: Cannot allowlist 'fchmod' for mode 0600: %s\n", __PROGRAM_NAME, strerror(errno));
+    (void)seccomp_release(ctx);
+    exit(EXIT_FAILURE);
+  }
+
+  /*
+   * FILE METADATA OPERATIONS
+   * These are needed for checking file/directory properties.
+   * Note: Cannot easily restrict arguments for these syscalls.
+   */
+
+  /* Get file status by fd - used extensively for verification */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'fstat'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'fstat': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Get file status by path - used for existence checks */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(stat), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'stat'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'stat': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Get file status (newer variant) - used by modern libc */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(newfstatat), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'newfstatat'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'newfstatat': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Get file status without following symlinks - for symlink detection */
+  if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(lstat), 0) != 0) {
+    (void)fprintf(stderr, "%s: Cannot allowlist 'lstat': %s\n", __PROGRAM_NAME, strerror(errno));
+    (void)seccomp_release(ctx);
+    exit(EXIT_FAILURE);
+  }
+
+  /*
+   * DIRECTORY OPERATIONS
+   * Needed for creating user-specific keytab directories.
+   */
+
+  /* Create directory - for user keytab directory */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mkdir), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'mkdir'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'mkdir': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Change file ownership - for setting keytab ownership to user */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fchown), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'fchown'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'fchown': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
 
-#if USE_CAPABILITIES == 1
+  /* Get directory entries - used by opendir/readdir */
+  if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getdents64), 0) != 0) {
+    (void)fprintf(stderr, "%s: Cannot allowlist 'getdents64': %s\n", __PROGRAM_NAME, strerror(errno));
+    (void)seccomp_release(ctx);
+    exit(EXIT_FAILURE);
+  }
+
+  /*
+   * CAPABILITY MANAGEMENT SYSCALLS
+   * Only included if capabilities are enabled at compile time.
+   */
+
+  /* Get capability state - used by cap_get_proc */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(capget), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'capget'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'capget': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
+
+  /* Set capability state - used by cap_set_proc */
   if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(capset), 0) != 0) {
-    (void)fprintf(stderr, "%s: Cannot set allowlist 'capset'.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Cannot allowlist 'capset': %s\n", __PROGRAM_NAME, strerror(errno));
     (void)seccomp_release(ctx);
     exit(EXIT_FAILURE);
   }
-#endif
 
-  /* Load rules */
-  (void)seccomp_load(ctx);
+  /*
+   * Load the seccomp filter into the kernel.
+   * After this point, any syscall not in the allowlist will kill the process.
+   */
+  if (seccomp_load(ctx) != 0) {
+    (void)fprintf(stderr, "%s: Cannot load seccomp filters: %s\n", __PROGRAM_NAME, strerror(errno));
+    (void)seccomp_release(ctx);
+    exit(EXIT_FAILURE);
+  }
 
-  /* Release memory */
+  /* Release the seccomp context memory */
   (void)seccomp_release(ctx);
 
   return 0;
 }
 
-#endif
+#endif /* KCRON_SECCOMP_H */

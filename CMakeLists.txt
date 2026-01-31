@@ -49,4 +49,3 @@ include(src/shell/CMakeLists.txt)
 message("${CMAKE_PROJECT_NAME} - ${VERSION}")
 feature_summary(WHAT ALL)
 feature_summary(FILENAME ${CMAKE_CURRENT_BINARY_DIR}/features.log WHAT ALL)
-

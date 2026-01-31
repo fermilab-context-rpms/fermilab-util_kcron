@@ -1,8 +1,9 @@
 /*
  *
- * A simple program that generates a blank keytab in a deterministic location.
+ * A simple program that prints the path to the user's client keytab file.
  *
- * It should be SETUID(3p) root or have the right CAPABILITIES(7).
+ * This program determines the keytab path based on the calling user's UID
+ * and prints it to stdout. It does NOT require special privileges.
  *
  */
 #include "autoconf.h" /* for our automatic config bits        */
@@ -49,42 +50,60 @@
 
 #include "kcron_filename.h"
 
+/*
+ * Cleanup helper to free all allocated buffers.
+ * Ensures consistent cleanup on all exit paths.
+ */
+static void free_buffers(char *keytab, char *keytab_dirname, char *keytab_filename) __attribute__((flatten)) __attribute__((cold));
+static void free_buffers(char *keytab, char *keytab_dirname, char *keytab_filename) {
+  /* NULL checks required for explicitness even though free() accepts NULL */
+  if (keytab != NULL) {
+    (void)free(keytab);
+  }
+  if (keytab_dirname != NULL) {
+    (void)free(keytab_dirname);
+  }
+  if (keytab_filename != NULL) {
+    (void)free(keytab_filename);
+  }
+}
+
+/*
+ * Main program entry point.
+ *
+ * This program simply computes and prints the keytab path for the current user.
+ * It requires no special privileges and performs no file operations.
+ *
+ * Returns: EXIT_SUCCESS on success, EXIT_FAILURE on error
+ */
 int main(void) {
+  /*
+   * Allocate buffers with extra space for safety.
+   * calloc() zero-initializes, providing NULL terminators throughout.
+   */
+  char *keytab = calloc(FILE_PATH_MAX_LENGTH, sizeof(char));
+  char *keytab_dirname = calloc(FILE_PATH_MAX_LENGTH, sizeof(char));
+  char *keytab_filename = calloc(FILE_PATH_MAX_LENGTH, sizeof(char));
 
-  const char *nullstring = NULL;
-
-  char *keytab = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
-  char *keytab_dirname = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
-  char *keytab_filename = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
-
-  if ((keytab == nullstring) || (keytab_dirname == nullstring) || (keytab_filename == nullstring)) {
-    if (keytab != nullstring) {
-      (void)free(keytab);
-    }
-    if (keytab_dirname != nullstring) {
-      (void)free(keytab_dirname);
-    }
-    if (keytab_filename != nullstring) {
-      (void)free(keytab_filename);
-    }
-
-    (void)fprintf(stderr, "%s: unable to allocate memory.\n", __PROGRAM_NAME);
+  /* Check all allocations - fail fast if any allocation failed */
+  if ((keytab == NULL) || (keytab_dirname == NULL) || (keytab_filename == NULL)) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename);
+    (void)fprintf(stderr, "%s: Unable to allocate memory.\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
+  /* Build the keytab path based on current user's UID */
   if (get_filenames(keytab_dirname, keytab_filename, keytab) != 0) {
-    (void)free(keytab);
-    (void)free(keytab_dirname);
-    (void)free(keytab_filename);
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename);
     (void)fprintf(stderr, "%s: Cannot determine keytab filename.\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
+  /* Print the keytab path to stdout */
   (void)printf("%s\n", keytab);
 
-  (void)free(keytab);
-  (void)free(keytab_dirname);
-  (void)free(keytab_filename);
+  /* Clean up allocated memory */
+  (void)free_buffers(keytab, keytab_dirname, keytab_filename);
 
   exit(EXIT_SUCCESS);
 }

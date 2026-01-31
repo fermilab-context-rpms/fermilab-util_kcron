@@ -44,12 +44,12 @@
 #define __PROGRAM_NAME "init-kcron-keytab"
 #endif
 
-#include "autoconf.h"
-
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/capability.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -61,15 +61,14 @@
 #include "kcron_setup.h"
 
 #ifndef _0600
-#define _0600 S_IRUSR | S_IWUSR
+#define _0600 (S_IRUSR | S_IWUSR)
 #endif
 #ifndef _0700
-#define _0700 S_IRWXU
+#define _0700 (S_IRWXU)
 #endif
 
-static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mode) __attribute__((nonnull(1))) __attribute__((access(read_only, 1))) __attribute__((warn_unused_result));
-static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mode) {
-
+static inline int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mode) __attribute__((access(read_only, 1))) __attribute__((warn_unused_result));
+static inline int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mode) {
 #if USE_CAPABILITIES == 1
   const cap_value_t caps[] = {CAP_CHOWN, CAP_DAC_OVERRIDE};
 #else
@@ -78,27 +77,28 @@ static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mo
   const int num_caps = sizeof(caps) / sizeof(cap_value_t);
 
   struct stat st = {0};
+  struct stat lst = {0};
 
-  const char *nullstring = NULL;
-
-  DIR *my_dir = NULL;
-  const DIR *null_dir = NULL;
-
-  const uid_t uid = getuid();
-  const uid_t euid = geteuid();
-
-  if (dir == nullstring) {
+  if (dir == NULL) {
     /* nothing to do - no dir passed */
     return 0;
   }
 
+  /* Check for symlink to prevent TOCTOU symlink attacks */
+  if (lstat(dir, &lst) == 0) {
+    if (S_ISLNK(lst.st_mode)) {
+      (void)fprintf(stderr, "%s: %s is a symlink, not allowed.\n", __PROGRAM_NAME, dir);
+      return 1;
+    }
+  }
+
   if (stat(dir, &st) == 0) {
-    /* exists*/
+    /* exists */
     if (S_ISDIR(st.st_mode)) {
       /* and is a directory */
       return 0;
     } else {
-      /* whatever this is, it is not acceptable here */
+      /* whatever this is, it is not a directory */
       (void)fprintf(stderr, "%s: %s is not a directory.\n", __PROGRAM_NAME, dir);
       return 1;
     }
@@ -109,41 +109,23 @@ static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mo
     return 1;
   }
 
-  /* use of CAP_DAC_OVERRIDE */
+  /* use of CAP_DAC_OVERRIDE to bypass discretionary access controls for mkdir */
   if (mkdir(dir, mode) != 0) {
     (void)disable_capabilities();
     (void)fprintf(stderr, "%s: Unable to mkdir %s\n", __PROGRAM_NAME, dir);
     return 1;
   }
 
-  if (disable_capabilities() != 0) {
-    (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-    return 1;
-  }
-
-  if (euid != uid) {
-    /* use of CAP_DAC_OVERRIDE as we may not be able to chdir/make files otherwise   */
-    /* as the dir may be chmod 700 for not our euid */
-    if (enable_capabilities(caps, num_caps) != 0) {
-      (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
-      return 1;
-    }
-  }
-
-  /* use the inode of the dir we made earlier so folks can't move it      */
-  /* there is still a small race condition, but we are somewhat protected */
-  /* since opendir should make sure this is a directory.                  */
-  /* use of CAP_DAC_OVERRIDE */
-  my_dir = opendir(dir);
-
-  if (my_dir == null_dir) {
+  /* use of CAP_DAC_OVERRIDE as we might not be able to write to dir */
+  DIR *my_dir = opendir(dir);
+  if (my_dir == NULL) {
     (void)disable_capabilities();
     (void)fprintf(stderr, "%s: Unable to locate %s ?\n", __PROGRAM_NAME, dir);
     (void)fprintf(stderr, "%s: This may be a permissions error?\n", __PROGRAM_NAME);
     return 1;
   }
 
-  /* did the directory really create on disk */
+  /* use of CAP_DAC_OVERRIDE as we might not be able to list dir */
   if (fstat(dirfd(my_dir), &st) != 0) {
     (void)closedir(my_dir);
     (void)disable_capabilities();
@@ -152,12 +134,7 @@ static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mo
     return 1;
   }
 
-  if (disable_capabilities() != 0) {
-    /* technically we might not have active caps now, but eh              */
-    (void)closedir(my_dir);
-    (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-    return 1;
-  }
+  disable_capabilities();
 
   if (!S_ISDIR(st.st_mode)) {
     (void)closedir(my_dir);
@@ -167,12 +144,11 @@ static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mo
   }
 
   if (enable_capabilities(caps, num_caps) != 0) {
-    (void)closedir(my_dir);
     (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
     return 1;
   }
 
-  /* use of CAP_CHOWN */
+  /* use of CAP_CHOWN to change ownership of the directory */
   if (fchown(dirfd(my_dir), owner, group) != 0) {
     (void)closedir(my_dir);
     (void)disable_capabilities();
@@ -181,21 +157,17 @@ static int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mo
     return 1;
   }
 
-  if (disable_capabilities() != 0) {
-    (void)closedir(my_dir);
-    (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-    return 1;
-  }
+  disable_capabilities();
 
   (void)closedir(my_dir);
   return 0;
 }
 
-static int chown_chmod_keytab(int filedescriptor, const char *keytab) __attribute__((nonnull(2))) __attribute__((access(read_only, 2))) __attribute__((warn_unused_result));
-static int chown_chmod_keytab(int filedescriptor, const char *keytab) {
+static inline int chown_chmod_keytab(int filedescriptor, const char *keytab) __attribute__((access(read_only, 2))) __attribute__((warn_unused_result));
+static inline int chown_chmod_keytab(int filedescriptor, const char *keytab) {
 
 #if USE_CAPABILITIES == 1
-  const cap_value_t keytab_caps[] = {CAP_CHOWN};
+  const cap_value_t keytab_caps[] = {CAP_CHOWN, CAP_DAC_OVERRIDE};
 #else
   const cap_value_t keytab_caps[] = {-1};
 #endif
@@ -216,17 +188,14 @@ static int chown_chmod_keytab(int filedescriptor, const char *keytab) {
     return 1;
   }
 
-  /* did the file really create on disk */
-  /* use of CAP_DAC_OVERRIDE because dir should be chmod 700 */
+  /* use of CAP_DAC_OVERRIDE to bypass access checks for fstat on keytab file */
   if (fstat(filedescriptor, &st) != 0) {
     (void)fprintf(stderr, "%s: Cannot stat file %s.\n", __PROGRAM_NAME, keytab);
+    (void)disable_capabilities();
     return 1;
   }
 
-  if (disable_capabilities() != 0) {
-    (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-    return 1;
-  }
+  disable_capabilities();
 
   if (!S_ISREG(st.st_mode)) {
     (void)fprintf(stderr, "%s: %s is not a regular file.\n", __PROGRAM_NAME, keytab);
@@ -234,7 +203,7 @@ static int chown_chmod_keytab(int filedescriptor, const char *keytab) {
   }
 
   /* ensure permissions are as expected on keytab file */
-  /* newly created file should have out euid as owner, so no caps needed */
+  /* no capabilities required for fchmod, we already own it */
   if (fchmod(filedescriptor, _0600) != 0) {
     (void)disable_capabilities();
     (void)fprintf(stderr, "%s: Unable to chmod %o %s\n", __PROGRAM_NAME, _0600, keytab);
@@ -244,25 +213,185 @@ static int chown_chmod_keytab(int filedescriptor, const char *keytab) {
   /* Set the right owner of our keytab */
   /* Don't switch euid to uid as that may permit write to program memory */
   if (st.st_uid != uid || st.st_gid != gid) {
-
     if (enable_capabilities(keytab_caps, num_caps) != 0) {
       (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
       return 1;
     }
 
-    /* use of CAP_CHOWN, needed for SUID mode */
+    /* use of CAP_CHOWN to set ownership of the keytab file */
     if (fchown(filedescriptor, uid, gid) != 0) {
       (void)disable_capabilities();
       (void)fprintf(stderr, "%s: Unable to chown %d:%d %s\n", __PROGRAM_NAME, uid, gid, keytab);
       return 1;
     }
 
-    if (disable_capabilities() != 0) {
-      (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-      return 1;
-    }
+    disable_capabilities();
   }
 
+  return 0;
+}
+
+static inline void free_buffers(char *keytab, char *keytab_dirname, char *keytab_filename, char *client_keytab_dirname);
+static inline void free_buffers(char *keytab, char *keytab_dirname, char *keytab_filename, char *client_keytab_dirname) {
+  if (keytab != NULL) {
+    (void)free(keytab);
+  }
+  if (keytab_dirname != NULL) {
+    (void)free(keytab_dirname);
+  }
+  if (keytab_filename != NULL) {
+    (void)free(keytab_filename);
+  }
+  if (client_keytab_dirname != NULL) {
+    (void)free(client_keytab_dirname);
+  }
+}
+
+static int validate_client_dirname(char *client_keytab_dirname) __attribute__((warn_unused_result));
+static int validate_client_dirname(char *client_keytab_dirname) {
+  struct stat lst = {0};
+  struct stat st = {0};
+
+  if (client_keytab_dirname == NULL) {
+    (void)fprintf(stderr, "%s: Client keytab directory pointer is NULL.\n", __PROGRAM_NAME);
+    return 1;
+  }
+
+  /* Check symlink on client_keytab_dirname before stat */
+  if (lstat(client_keytab_dirname, &lst) != 0) {
+    (void)fprintf(stderr, "%s: Client keytab directory does not exist: %s.\n", __PROGRAM_NAME, client_keytab_dirname);
+    (void)fprintf(stderr, "%s: Contact your admin to have it created correctly.\n", __PROGRAM_NAME);
+    return 1;
+  }
+  if (S_ISLNK(lst.st_mode)) {
+    (void)fprintf(stderr, "%s: Client keytab directory %s is a symlink, not allowed.\n", __PROGRAM_NAME, client_keytab_dirname);
+    return 1;
+  }
+
+  if (stat(client_keytab_dirname, &st) == -1) {
+    (void)fprintf(stderr, "%s: Client keytab directory does not exist: %s.\n", __PROGRAM_NAME, client_keytab_dirname);
+    (void)fprintf(stderr, "%s: Contact your admin to have it created.\n", __PROGRAM_NAME);
+    return 1;
+  }
+  return 0;
+}
+
+static int create_keytab_file(const char *keytab_dirname, const char *keytab_filename, const char *keytab) __attribute__((warn_unused_result));
+static int create_keytab_file(const char *keytab_dirname, const char *keytab_filename, const char *keytab) {
+  struct stat st = {0};
+  struct stat lst = {0};
+  DIR *keytab_dir = NULL;
+  int filedescriptor = -1;
+
+#if USE_CAPABILITIES == 1
+  const cap_value_t caps[] = {CAP_DAC_OVERRIDE};
+#else
+  const cap_value_t caps[] = {-1};
+#endif
+  const int num_caps = sizeof(caps) / sizeof(cap_value_t);
+
+  /* Validate non-null input pointers */
+  if (keytab_dirname == NULL) {
+    (void)fprintf(stderr, "%s: keytab_dirname pointer is NULL.\n", __PROGRAM_NAME);
+    return 1;
+  }
+  if (keytab_filename == NULL) {
+    (void)fprintf(stderr, "%s: keytab_filename pointer is NULL.\n", __PROGRAM_NAME);
+    return 1;
+  }
+  if (keytab == NULL) {
+    (void)fprintf(stderr, "%s: keytab pointer is NULL.\n", __PROGRAM_NAME);
+    return 1;
+  }
+
+  /* enable CAP_DAC_OVERRIDE to bypass permission checks temporarily for
+   * directory access and file creation.
+   * This capability is used only around operations that need it and dropped immediately after.
+   */
+  if (enable_capabilities(caps, num_caps) != 0) {
+    (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
+    return 1;
+  }
+
+  /* Check if keytab_dirname exists and is not a symlink (to avoid TOCTOU symlink attacks) */
+  if (lstat(keytab_dirname, &lst) != 0) {
+    (void)fprintf(stderr, "%s: %s does not exist.\n", __PROGRAM_NAME, keytab_dirname);
+    (void)disable_capabilities();
+    return 1;
+  }
+  if (S_ISLNK(lst.st_mode)) {
+    (void)fprintf(stderr, "%s: %s is a symlink, not allowed.\n", __PROGRAM_NAME, keytab_dirname);
+    (void)disable_capabilities();
+    return 1;
+  }
+
+  /* Open the directory handle to perform file operations safely on the directory inode */
+  keytab_dir = opendir(keytab_dirname);
+  if (keytab_dir == NULL) {
+    (void)fprintf(stderr, "%s: Unable to locate %s ?\n", __PROGRAM_NAME, keytab_dirname);
+    (void)fprintf(stderr, "%s: This may be a permissions error?\n", __PROGRAM_NAME);
+    (void)disable_capabilities();
+    return 1;
+  }
+
+  /* Verify the opened directory is indeed a directory */
+  if (fstat(dirfd(keytab_dir), &st) != 0) {
+    (void)fprintf(stderr, "%s: %s could not be read.\n", __PROGRAM_NAME, keytab_dirname);
+    (void)closedir(keytab_dir);
+    (void)disable_capabilities();
+    return 1;
+  }
+
+  (void)disable_capabilities();
+
+  if (!S_ISDIR(st.st_mode)) {
+    (void)fprintf(stderr, "%s: %s is not a directory.\n", __PROGRAM_NAME, keytab_dirname);
+    (void)closedir(keytab_dir);
+    (void)disable_capabilities();
+    return 1;
+  }
+
+  /* Open the keytab file with O_NOFOLLOW to prevent symlink attacks,
+   * O_CREAT to create if missing, and O_CLOEXEC for descriptor safety.
+   * Permissions set to 0600 for security.
+   */
+  filedescriptor = openat(dirfd(keytab_dir), keytab_filename, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, _0600);
+  if (filedescriptor < 0) {
+    (void)closedir(keytab_dir);
+    (void)fprintf(stderr, "%s: %s is missing, cannot create: %s\n", __PROGRAM_NAME, keytab, strerror(errno));
+    return 1;
+  }
+  (void)closedir(keytab_dir);
+
+  /* Verify that the created file is a regular file */
+  if (fstat(filedescriptor, &st) != 0) {
+    (void)close(filedescriptor);
+    (void)disable_capabilities();
+    (void)fprintf(stderr, "%s: %s could not be created.\n", __PROGRAM_NAME, keytab);
+    return 1;
+  }
+  if (!S_ISREG(st.st_mode)) {
+    (void)close(filedescriptor);
+    (void)disable_capabilities();
+    (void)fprintf(stderr, "%s: %s is not a regular file.\n", __PROGRAM_NAME, keytab);
+    return 1;
+  }
+
+  /* Write empty keytab content to the file */
+  if (write_empty_keytab(filedescriptor) != 0) {
+    (void)close(filedescriptor);
+    (void)fprintf(stderr, "%s: Cannot create keytab : %s.\n", __PROGRAM_NAME, keytab);
+    return 1;
+  }
+
+  /* Set ownership and permission on the keytab file */
+  if (chown_chmod_keytab(filedescriptor, keytab) != 0) {
+    (void)close(filedescriptor);
+    (void)fprintf(stderr, "%s: Cannot set permissions on keytab : %s.\n", __PROGRAM_NAME, keytab);
+    return 1;
+  }
+
+  (void)close(filedescriptor);
   return 0;
 }
 
@@ -273,15 +402,7 @@ void constructor(void) {
 }
 
 int main(void) {
-
   struct stat st = {0};
-
-  const char *nullstring = NULL;
-  int filedescriptor = 0;
-  int stat_code = -1;
-
-  DIR *keytab_dir = NULL;
-  const DIR *null_dir = NULL;
 
 #if USE_CAPABILITIES == 1
   const cap_value_t caps[] = {CAP_DAC_OVERRIDE};
@@ -290,239 +411,65 @@ int main(void) {
 #endif
   const int num_caps = sizeof(caps) / sizeof(cap_value_t);
 
-  const uid_t euid = geteuid();
   const uid_t uid = getuid();
   const gid_t gid = getgid();
 
   char *keytab = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
   char *keytab_dirname = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
   char *keytab_filename = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
-
   char *client_keytab_dirname = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
 
-  /* verify memory can be allocated */
-  if ((keytab == nullstring) || (keytab_dirname == nullstring) || (keytab_filename == nullstring) || (client_keytab_dirname == nullstring)) {
-    if (keytab != nullstring) {
-      (void)free(keytab);
-    }
-    if (keytab_dirname != nullstring) {
-      (void)free(keytab_dirname);
-    }
-    if (keytab_filename != nullstring) {
-      (void)free(keytab_filename);
-    }
-    if (client_keytab_dirname != nullstring) {
-      (void)free(client_keytab_dirname);
-    }
-
+  if ((keytab == NULL) || (keytab_dirname == NULL) || (keytab_filename == NULL) || (client_keytab_dirname == NULL)) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Unable to allocate memory.\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
-  /* is our client keytab directory set*/
   if (get_client_dirname(client_keytab_dirname) != 0) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Client keytab directory not set.\n", __PROGRAM_NAME);
-    (void)free(keytab);
-    (void)free(keytab_dirname);
-    (void)free(keytab_filename);
-    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
-  /* look for our client keytab directory */
-  if (stat(client_keytab_dirname, &st) == -1) {
-    (void)fprintf(stderr, "%s: Client keytab directory does not exist: %s.\n", __PROGRAM_NAME, client_keytab_dirname);
-    (void)fprintf(stderr, "%s: Contact your admin to have it created.\n", __PROGRAM_NAME);
-    (void)free(keytab);
-    (void)free(keytab_dirname);
-    (void)free(keytab_filename);
-    (void)free(client_keytab_dirname);
+  if (validate_client_dirname(client_keytab_dirname) != 0) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
-  /* find our filenames */
   if (get_filenames(keytab_dirname, keytab_filename, keytab) != 0) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Cannot determine keytab filename.\n", __PROGRAM_NAME);
-    (void)free(keytab);
-    (void)free(keytab_dirname);
-    (void)free(keytab_filename);
-    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
-  /* make sure our storage directory exists */
   if (mkdir_if_missing(keytab_dirname, uid, gid, _0700) != 0) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Cannot make dir %s.\n", __PROGRAM_NAME, keytab_dirname);
-    (void)free(keytab);
-    (void)free(keytab_dirname);
-    (void)free(keytab_filename);
-    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
-  if (euid != uid) {
-    /* use of CAP_DAC_OVERRIDE as we may not be able to chdir otherwise   */
-    if (enable_capabilities(caps, num_caps) != 0) {
-      (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-  }
-
-  /* look for our keytab */
-  stat_code = stat(keytab, &st);
-
-  if (disable_capabilities() != 0) {
-    (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-    (void)free(keytab);
-    (void)free(keytab_dirname);
-    (void)free(keytab_filename);
-    (void)free(client_keytab_dirname);
+  /* use of CAP_DAC_OVERRIDE as we may not be able to chdir otherwise   */
+  if (enable_capabilities(caps, num_caps) != 0) {
+    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
+    (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
-  /* If keytab is missing make it */
-  /* If it exists but has the wrong permissions/owner do nothing, it is safer */
+  int stat_code = stat(keytab, &st);
+
+  disable_capabilities();
+
+  /* create keytab if missing */
   if (stat_code == -1) {
-
-    if (euid != uid) {
-      /* use of CAP_DAC_OVERRIDE as we may not be able to chdir otherwise   */
-      if (enable_capabilities(caps, num_caps) != 0) {
-        (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
-        (void)free(keytab);
-        (void)free(keytab_dirname);
-        (void)free(keytab_filename);
-        (void)free(client_keytab_dirname);
-        exit(EXIT_FAILURE);
-      }
-    }
-
-    /* use the inode of the dir we made earlier so folks can't move it      */
-    /* there is still a small race condition, but we are somewhat protected */
-    /* since opendir should make sure this is a directory                   */
-    keytab_dir = opendir(keytab_dirname);
-
-    /* did the dir really open */
-    if (keytab_dir == null_dir) {
-      (void)fprintf(stderr, "%s: Unable to locate %s ?\n", __PROGRAM_NAME, keytab_dirname);
-      (void)fprintf(stderr, "%s: This may be a permissions error?\n", __PROGRAM_NAME);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
+    if (create_keytab_file(keytab_dirname, keytab_filename, keytab) != 0) {
+      (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
       exit(EXIT_FAILURE);
     }
-
-    if (fstat(dirfd(keytab_dir), &st) != 0) {
-      (void)fprintf(stderr, "%s: %s could not be read.\n", __PROGRAM_NAME, keytab_dirname);
-      (void)closedir(keytab_dir);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    if (disable_capabilities() != 0) {
-      (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    if (!S_ISDIR(st.st_mode)) {
-      (void)fprintf(stderr, "%s: %s is not a directory.\n", __PROGRAM_NAME, keytab_dirname);
-      (void)closedir(keytab_dir);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    filedescriptor = openat(dirfd(keytab_dir), keytab_filename, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, _0600);
-
-    if (disable_capabilities() != 0) {
-      /* technically we might not have active caps now, but eh              */
-      (void)fprintf(stderr, "%s: Cannot drop capabilities.\n", __PROGRAM_NAME);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    /* did the file really create at the target location */
-    if (filedescriptor == 0) {
-      (void)fprintf(stderr, "%s: %s is missing, cannot create.\n", __PROGRAM_NAME, keytab);
-      (void)closedir(keytab_dir);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    /* we have the fd, don't need this one any more */
-    (void)closedir(keytab_dir);
-
-    /* did the file really create on disk */
-    if (fstat(filedescriptor, &st) != 0) {
-      (void)fprintf(stderr, "%s: %s could not be created.\n", __PROGRAM_NAME, keytab);
-      (void)close(filedescriptor);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    /* is the file a normal file */
-    if (!S_ISREG(st.st_mode)) {
-      (void)fprintf(stderr, "%s: %s is not a file.\n", __PROGRAM_NAME, keytab);
-      (void)close(filedescriptor);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    /* write to it first to ensure its content is right before we set owner/mode */
-    if (write_empty_keytab(filedescriptor) != 0) {
-      (void)fprintf(stderr, "%s: Cannot create keytab : %s.\n", __PROGRAM_NAME, keytab);
-      (void)close(filedescriptor);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    if (chown_chmod_keytab(filedescriptor, keytab) != 0) {
-      (void)fprintf(stderr, "%s: Cannot set permissions on keytab : %s.\n", __PROGRAM_NAME, keytab);
-      (void)close(filedescriptor);
-      (void)free(keytab);
-      (void)free(keytab_dirname);
-      (void)free(keytab_filename);
-      (void)free(client_keytab_dirname);
-      exit(EXIT_FAILURE);
-    }
-
-    (void)close(filedescriptor);
-  } /* no else required, this exists to make it */
+  }
 
   (void)printf("%s\n", keytab);
 
-  (void)free(keytab);
-  (void)free(keytab_dirname);
-  (void)free(keytab_filename);
-  (void)free(client_keytab_dirname);
+  (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
 
   exit(EXIT_SUCCESS);
 }

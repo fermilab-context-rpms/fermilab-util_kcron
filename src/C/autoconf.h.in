@@ -31,31 +31,64 @@
    IN THE SOFTWARE.
 
 */
+
 #ifndef KCRON_CONF_H
 #define KCRON_CONF_H 1
 
+/*
+ * Configuration header for kcron security tools.
+ * This file is generated from autoconf.h.in by CMake.
+ */
+
 #include <unistd.h>   /* for sysconf */
 
+/* Version information */
 #cmakedefine VERSION "@VERSION@"
 
-#cmakedefine USE_CAPABILITIES @HAVE_CAPABILITIES_H@
-#cmakedefine USE_SYSTEMTAP @HAVE_SDT_H@
+/*
+ * Security feature flags - set by CMake based on system capabilities.
+ */
 #cmakedefine USE_SECCOMP @HAVE_SECCOMP_H@
 #cmakedefine USE_LANDLOCK @HAVE_LANDLOCK_H@
 
+/* Debug mode flag */
 #cmakedefine DEBUG
 
+/* Base directory for client keytab files - configured at build time */
 #define __CLIENT_KEYTAB_DIR "@CLIENT_KEYTAB_DIR@"
 
+/*
+ * System-dependent limits obtained at runtime.
+ * Note: sysconf() calls are evaluated at runtime, not compile time.
+ * These macros should only be used for initialization, not in array declarations.
+ */
 #define HOSTNAME_MAX_LENGTH (size_t) sysconf(_SC_HOST_NAME_MAX)
 #define USERNAME_MAX_LENGTH (size_t) sysconf(_SC_LOGIN_NAME_MAX)
+
+/*
+ * File path maximum length - fixed at compile time for buffer allocation.
+ * This should be large enough for all practical use cases (typically 4096).
+ */
 #define FILE_PATH_MAX_LENGTH @FILE_PATH_MAX_LENGTH@
 
-#define _GNU_SOURCE 0
-#define _XOPEN_SOURCE 900
+/*
+ * Feature test macros for POSIX and X/Open compliance.
+ * _XOPEN_SOURCE=700 provides POSIX.1-2008 + XSI extensions.
+ */
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
 
+/* Compile-time assertions for critical assumptions */
+_Static_assert(sizeof(char) == 1, "char must be 1 byte");
+_Static_assert(FILE_PATH_MAX_LENGTH >= 4096, "Path buffer too small");
+_Static_assert(FILE_PATH_MAX_LENGTH <= 8192, "Path buffer unreasonably large");
+
+/*
+ * Conditional includes for security features.
+ * Only include headers if the feature is enabled.
+ */
 #if USE_SECCOMP == 1
 #include <linux/seccomp.h>
 #endif
 
-#endif
+#endif /* KCRON_CONF_H */

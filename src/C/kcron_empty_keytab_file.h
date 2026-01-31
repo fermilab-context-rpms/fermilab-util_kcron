@@ -1,6 +1,6 @@
 /*
  *
- * A simple place where we keep our SETRLIMIT(2) calls
+ * Functions for writing empty keytab file headers
  *
  */
 #include "autoconf.h" /* for our automatic config bits        */
@@ -41,33 +41,100 @@
 #ifndef KCRON_EMPTY_KEYTAB_FILE_H
 #define KCRON_EMPTY_KEYTAB_FILE_H 1
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-int write_empty_keytab(int filedescriptor) __attribute__((warn_unused_result)) __attribute__((fd_arg_write(1)));
+/*
+ * Write an empty keytab file header.
+ *
+ * A valid keytab file must start with two magic bytes that identify it
+ * as a keytab file (version 5, format 2). This function writes those
+ * magic bytes to create an empty but valid keytab file.
+ *
+ * The magic bytes are:
+ * - 0x05: Keytab version 5
+ * - 0x02: Format 2
+ *
+ * This format is compatible with MIT Kerberos tools like ktutil and kadmin.
+ *
+ * Parameters:
+ *   filedescriptor: Open file descriptor to write to (must be writable)
+ *
+ * Returns: 0 on success, exits on failure
+ *
+ * Security Note: The file descriptor should already have proper permissions
+ * set (0600) and ownership before calling this function.
+ */
+int write_empty_keytab(int filedescriptor) __attribute__((warn_unused_result)) __attribute__((flatten));
 int write_empty_keytab(int filedescriptor) {
+  ssize_t bytes_written = 0;
 
+  /* Validate file descriptor */
+  if (filedescriptor < 0) {
+    (void)fprintf(stderr, "%s: Invalid file descriptor (%d) for keytab.\n", __PROGRAM_NAME, filedescriptor);
+    exit(EXIT_FAILURE);
+  }
+  /* Validate file descriptor is not stdin */
   if (filedescriptor == 0) {
-    (void)fprintf(stderr, "%s: no keytab file specified.\n", __PROGRAM_NAME);
+    (void)fprintf(stderr, "%s: Invalid file descriptor (STDIN) for keytab.\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
-  /* This magic string makes ktutil and kadmin happy with an empty file */
-  const char emptykeytab_a = 0x05;
-  const char emptykeytab_b = 0x02;
-
-  if (write(filedescriptor, &emptykeytab_a, sizeof(emptykeytab_a)) != sizeof(emptykeytab_a)) {
-    (void)fprintf(stderr, "%s: could not write initial block to keytab.\n", __PROGRAM_NAME);
-    exit(EXIT_FAILURE);
-  }
-  if (write(filedescriptor, &emptykeytab_b, sizeof(emptykeytab_b)) != sizeof(emptykeytab_b)) {
-    (void)fprintf(stderr, "%s: could not write initial blocks to keytab.\n", __PROGRAM_NAME);
+  /* Validate file descriptor is not stdout */
+  if (filedescriptor == 1) {
+    (void)fprintf(stderr, "%s: Invalid file descriptor (STDOUT) for keytab.\n", __PROGRAM_NAME);
     exit(EXIT_FAILURE);
   }
 
-  (void)fsync(filedescriptor);
+  /* Validate file descriptor is not stderr */
+  if (filedescriptor == 2) {
+    (void)fprintf(stderr, "%s: Invalid file descriptor (STDERR) for keytab.\n", __PROGRAM_NAME);
+    exit(EXIT_FAILURE);
+  }
+
+  /*
+   * Magic bytes for empty keytab file (Kerberos keytab v5.2 format).
+   * These bytes make ktutil and kadmin recognize this as a valid empty keytab.
+   */
+  const unsigned char emptykeytab_a = 0x05; /* Version byte */
+  const unsigned char emptykeytab_b = 0x02; /* Format byte */
+
+  /* Write first magic byte (version) */
+  bytes_written = write(filedescriptor, &emptykeytab_a, sizeof(emptykeytab_a));
+  if (bytes_written != sizeof(emptykeytab_a)) {
+    if (bytes_written < 0) {
+      (void)fprintf(stderr, "%s: Failed to write version byte to keytab: %s\n", __PROGRAM_NAME, strerror(errno));
+    } else {
+      (void)fprintf(stderr, "%s: Partial write of version byte to keytab (%zd/%zu bytes).\n", __PROGRAM_NAME, bytes_written, sizeof(emptykeytab_a));
+    }
+    exit(EXIT_FAILURE);
+  }
+
+  /* Write second magic byte (format) */
+  bytes_written = write(filedescriptor, &emptykeytab_b, sizeof(emptykeytab_b));
+  if (bytes_written != sizeof(emptykeytab_b)) {
+    if (bytes_written < 0) {
+      (void)fprintf(stderr, "%s: Failed to write format byte to keytab: %s\n", __PROGRAM_NAME, strerror(errno));
+    } else {
+      (void)fprintf(stderr, "%s: Partial write of format byte to keytab (%zd/%zu bytes).\n", __PROGRAM_NAME, bytes_written, sizeof(emptykeytab_b));
+    }
+    exit(EXIT_FAILURE);
+  }
+
+  /*
+   * Synchronize file data to disk.
+   * This ensures the keytab is actually written before we return success.
+   * Important for crash resilience.
+   */
+  if (fsync(filedescriptor) != 0) {
+    (void)fprintf(stderr, "%s: Failed to sync keytab to disk: %s\n", __PROGRAM_NAME, strerror(errno));
+    exit(EXIT_FAILURE);
+  }
 
   return 0;
 }
 
-#endif
+#endif /* KCRON_EMPTY_KEYTAB_FILE_H */

@@ -1,6 +1,5 @@
 %define _hardened_build 1
 
-%bcond_without libcap
 %bcond_without seccomp
 
 %if 0%{?rhel} < 9 && 0%{?fedora} < 31
@@ -11,7 +10,7 @@
 
 Name:		fermilab-util_kcron
 
-Version:	1.9
+Version:	2.0
 Release:	1%{?dist}
 Summary:	A utility for getting Kerberos credentials in scheduled jobs
 
@@ -27,9 +26,6 @@ Provides:	fermilab-util_kcron = %{version}-%{release}
 BuildRequires: checksec openssl procps-ng
 %endif
 
-%if %{with libcap}
-BuildRequires:	libcap libcap-devel
-%endif
 %if %{with seccomp}
 BuildRequires:	libseccomp-devel
 %endif
@@ -39,6 +35,7 @@ BuildRequires:	kernel-devel
 
 BuildRequires:	cmake >= 3.14
 BuildRequires:	asciidoc redhat-rpm-config coreutils bash gcc
+BuildRequires:	libcap libcap-devel
 
 %if 0%{?rhel} < 10
 BuildRequires:	gcc-toolset-14 scl-utils
@@ -68,11 +65,6 @@ source scl_source enable gcc-toolset-14
 %endif
 
 %cmake3 -Wdev \
-%if %{with libcap}
- -DUSE_CAPABILITIES=ON \
-%else
- -DUSE_CAPABILITIES=OFF \
-%endif
 %if %{with seccomp}
  -DUSE_SECCOMP=ON \
 %else
@@ -141,15 +133,14 @@ done
 %attr(0755,root,root) %{_bindir}/*
 %attr(0755,root,root) /usr/libexec/kcron/client-keytab-name
 
-%if %{with libcap}
 # If you can edit the memory this allocates, you can redirect the caps
 #  so we still suid to prevent this. user 'bin' is basically unusable anyway.
 %attr(4755,bin,root) %caps(cap_chown=p cap_dac_override=p) %{_libexecdir}/kcron/init-kcron-keytab
-%else
-%attr(4755,root,root) %{_libexecdir}/kcron/init-kcron-keytab
-%endif
 
 %changelog
+* Sat Jan 31 2026 Pat Riehecky <riehecky@fnal.gov> - 2.0
+- libcap now mandatory
+
 * Wed May 28 2025 Pat Riehecky <riehecky@fnal.gov> - 1.9
 - update to 1.9
 
