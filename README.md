@@ -41,7 +41,7 @@ You are strongly encouraged to run with SELinux or AppArmor in enforcing mode to
 ## Build Requirements
 
   * CMake 3.14 or later
-  * C Compiler that understand C-2011
+  * C Compiler that understand C-2017
   * libcap headers - for use of system capibilities rather than suid
   * for manpages `asciidoc`
 
