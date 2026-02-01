@@ -22,12 +22,12 @@ jobs:
           fetch-depth: 0
 
       - name: install dependencies
-        run: sudo apt-get install -y libcap-dev libseccomp-dev systemtap-sdt-dev asciidoc
+        run: sudo apt-get install -y libcap-dev libseccomp-dev asciidoc
 
       - name: run build
         run: |
           mkdir build;
           cd build;
           cmake ..;
-          make;
+          cmake --build . --verbose;
           make test;

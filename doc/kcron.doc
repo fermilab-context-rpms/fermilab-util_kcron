@@ -1,13 +1,13 @@
 = kcron(1)
 
 == NAME
-kcroninit, kcrondestroy - Utilities getting Kerberos in scheduled jobs or daemons
+kcroninit, kcrondestroy - Utilities for getting Kerberos in scheduled jobs or daemons
 
 == SYNOPSIS
 
-*kcroninit* creates a cron principal and extracts into a keytab
+*kcroninit* [*-s*]
 
-*kcrondestroy* destroys keytab and deletes cron principal created by kcroninit(1)
+*kcrondestroy*
 
 == DESCRIPTION
 
@@ -15,7 +15,7 @@ The *kcroninit* utility creates a new principal of the form +username/cron/host.
 
 The *kcrondestroy* utility destroys the kerberos principal of the form +username/cron/host.domain@REALM+ (created previously via the kcroninit(1) utility) and then removes keytab file that was used for authentication.
 
-After you've run the kcroninit(1) utility Kerberos will begin using this keytab when any current tickets expire.  You can force this behavior by running KDESTROY(1) on your ticket cache now.
+After you've run the kcroninit(1) utility Kerberos will begin using this keytab when any current tickets expire.  You can force this behavior by running kdestroy(1) on your ticket cache now.
 
 === WORKFLOW
 
@@ -30,37 +30,97 @@ Runtime usage is automatic if you do not have a valid Kerberos ticket.
 
 Setup your cron job following traditional cron rules.  A +kcron+ prefix command is no longer required.
 
+== OPTIONS
+
 === kcroninit
 
-Accepts no arguments
+*-s*::
+  Shared account mode. Use the cron principal itself (+username/cron/host.domain@REALM+) as the admin principal for keytab extraction. This is intended for shared accounts that do not have their own Kerberos principal. The Service Desk should have already created the cron principal before using this option.
 
-	kcroninit
-
-Configuration can be provided in either +/etc/sysconfig/kcron+ or +~/.config/kcron+ if you desire.
+*-h*::
+  Display usage information and exit.
 
 === kcrondestroy
 
-Accepts no arguments
+Accepts no arguments beyond the standard configuration.
 
-	kcrondestroy
+== CONFIGURATION
 
-Configuration can be provided in either +/etc/sysconfig/kcron+ or +~/.config/kcron+ if you desire.
+Both utilities read configuration from the following locations (in order):
+
+**/etc/sysconfig/kcron**::
+  System-wide configuration file containing shell variable definitions.
+
+**~/.config/kcron**::
+  Per-user configuration file. Values here override system-wide settings.
+
+Configuration variables (sourced from these files):
+
+**WHOAMI**::
+  Username for the cron principal (defaults to current user).
+
+**NODENAME**::
+  Fully qualified domain name for the host.
+
+**REALM**::
+  Kerberos realm.
+
+**FULLPRINCIPAL**::
+  Complete principal name in the form +username/cron/host.domain@REALM+.
+
+**KEYTAB_INIT**::
+  Path to the keytab initialization utility (default: +/usr/libexec/kcron/init-kcron-keytab+).
+
+**KEYTAB_NAME_UTIL**::
+  Path to the keytab name utility (default: +/usr/libexec/kcron/client-keytab-name+).
+
+== EXAMPLES
+
+Basic usage for regular user accounts:
+
+----
+$ kcroninit
+kcroninit creates principal user/cron/host.example.com@EXAMPLE.COM and/or extracts its keys into a keytab.
+This principal is used by the kcron utility for authentication.
+You need to know the password for the 'user' user to continue.
+Do you want to continue? (y/n)y
+----
+
+Usage for shared accounts (service accounts without personal principals):
+
+----
+$ kcroninit -s
+----
+
+Destroying a cron principal and keytab:
+
+----
+$ kcrondestroy
+WARNING!!!
+kcrondestroy WILL REMOVE principal user/cron/host.example.com@EXAMPLE.COM from Kerberos realm EXAMPLE.COM
+and DELETE keytab /var/kerberos/krb5/user/1000/client.keytab.
+This principal is used by the kcron utility for authentication.
+
+Do you want to continue? (y/n)y
+----
 
 == LIMITATIONS
 
-The kcron helper utilities utilize filesystem CAPABILITIES(7) stored as XATTR(7) values on the binaries.  The application will not run as expected if your system does not support them.
+The kcron helper utilities utilize filesystem capabilities(7) stored as xattr(7) values on the binaries.  The application will not run as expected if your system does not support them.
 
 On modern Linux systems, these are enabled by default.
 
-NFS does not support CAPABILITIES(7) nor should it.  However, if you set this SUID 'root', it will continue to work as expected.  It is a terrible idea to permit SUID applications to run SUID from network file systems.
+NFS does not support capabilities(7) nor should it.  However, if you set this SUID 'root', it will continue to work as expected.  It is a terrible idea to permit SUID applications to run SUID from network file systems.
 
-You can review them with GETCAP(8) on /usr/libexec/kcron/*
+You can review them with getcap(8) on /usr/libexec/kcron/*
 
 The kcron helper utilities assume basic kerberos utilities are installed and configured on the system:
-KRB5.CONF(5)
-KINIT(1)
-KDESTROY(1)
-KADMIN(1)
+
+* krb5.conf(5)
+* kinit(1)
+* kdestroy(1)
+* kadmin(1)
+* klist(1)
 
 == EXIT STATUS
 
@@ -71,9 +131,23 @@ KADMIN(1)
   Failure (usage error; configuration error; unexpected error).
 
 *2*::
-  Failure (missing utilities; insufficient permissions)
+  Failure (missing utilities; insufficient permissions).
 
-== NOTE
+== FILES
+
+**/var/kerberos/krb5/user/${EUID}/client.keytab**::
+  Default location for the automatically-used keytab file.
+
+**/etc/sysconfig/kcron**::
+  System-wide configuration file.
+
+**~/.config/kcron**::
+  Per-user configuration file.
+
+**~/.k5identity**::
+  Optional file to specify which principal from the keytab should be used for automatic authentication.
+
+== NOTES
 
 The use of this utility requires changes to KDC configuration. Kerberos admins should review the README file for the details.
 
@@ -83,11 +157,15 @@ Recent versions of kerberos (MIT 1.11+, Heimdal 8+) are able to automatically ki
 
 if you do not have a valid Kerberos ticket.
 
-By default this behavior uses +~/.k5identity+ if users have this file.  If not the first principle found within the keytab (KTUTIL(1) slot 1 KINIT(1) rules for kinit -kt).
+By default this behavior uses +~/.k5identity+ if users have this file.  If not the first principle found within the keytab (ktutil(1) slot 0, kinit(1) rules for kinit -kt).
+
+== SEE ALSO
+
+kinit(1), kdestroy(1), kadmin(1), klist(1), ktutil(1), krb5.conf(5), capabilities(7), xattr(7), getcap(8)
 
 == LICENCE
 
-Copyright 2020 Fermi Research Alliance, LLC
+Copyright 2023 Fermi Research Alliance, LLC
 
 This software was produced under U.S. Government contract DE-AC02-07CH11359 for Fermi National Accelerator Laboratory (Fermilab), which is operated by Fermi Research Alliance, LLC for the U.S. Department of Energy. The U.S. Government has rights to use, reproduce, and distribute this software.  NEITHER THE GOVERNMENT NOR FERMI RESEARCH ALLIANCE, LLC MAKES ANY WARRANTY, EXPRESS OR IMPLIED, OR ASSUMES ANY LIABILITY FOR THE USE OF THIS SOFTWARE.  If software is modified to produce derivative works, such modified software should be clearly marked, so as not to confuse it with the version available from Fermilab.
 

@@ -34,11 +34,15 @@ BuildRequires:	kernel-devel
 %endif
 
 BuildRequires:	cmake >= 3.14
-BuildRequires:	asciidoc redhat-rpm-config coreutils bash gcc
+BuildRequires:  redhat-rpm-config coreutils bash gcc
 BuildRequires:	libcap libcap-devel
+
 
 %if 0%{?rhel} < 10
 BuildRequires:	gcc-toolset-14 scl-utils
+BuildRequires:  asciidoc
+%else
+BuildRequires: (rubygem-asciidoctor or asciidoc )
 %endif
 
 Requires:	krb5-workstation >= 1.11
