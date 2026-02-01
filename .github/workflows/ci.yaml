@@ -1,33 +1,44 @@
----
 name: Run CI
+
 on:
   push:
     branches:
-      - "**" # matches every branch
-      - "!gh-pages" # excludes gh-pages branch
+      - "**"
+      - "!gh-pages"
   pull_request:
     branches:
-      - master
+      - main
 
 jobs:
   compile:
     runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
 
     name: Test compile
 
     steps:
       - name: checkout code tree
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: install dependencies
-        run: sudo apt-get install -y libcap-dev libseccomp-dev asciidoc
+        run: |
+          dnf -y update
+          dnf -y install \
+            gcc \
+            gcc-c++ \
+            make \
+            cmake \
+            libcap-devel \
+            libseccomp-devel \
+            asciidoc
 
       - name: run build
         run: |
-          mkdir build;
-          cd build;
-          cmake ..;
-          cmake --build . --verbose;
-          make test;
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build . --verbose
+          ctest --output-on-failure
