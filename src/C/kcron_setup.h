@@ -108,8 +108,11 @@ int set_kcron_ulimits(void) {
     return 1;
   }
 
-  /* Minimal stack size (1KB should be sufficient for this simple program) */
-  const struct rlimit stack = {1024, 1024};
+  /* Minimal stack size should be sufficient for this simple program */
+  long page_size = sysconf(_SC_PAGESIZE);
+  if (page_size < 1024) page_size = 4096; /* fallback to workable size */
+  rlim_t min_stack = (rlim_t)page_size * 2u;
+  const struct rlimit stack = {min_stack, min_stack};
   if (setrlimit(RLIMIT_STACK, &stack) != 0) {
     (void)fprintf(stderr, "%s: Cannot set stack size limit: %s\n", __PROGRAM_NAME, strerror(errno));
     return 1;
