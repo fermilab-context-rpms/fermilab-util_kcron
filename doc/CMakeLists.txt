@@ -18,8 +18,7 @@ elseif(ASCIIDOC AND A2X)
   message(STATUS "Using asciidoc/a2x for manpage generation")
   add_custom_command(
     OUTPUT ${PROJECT_BINARY_DIR}/kcroninit.1
-    COMMAND ${CMAKE_COMMAND}
-            ${ASCIIDOC} --backend docbook -a "a2x-format=manpage" --doctype manpage --out-file ${PROJECT_BINARY_DIR}/kcron.xml ${PROJECT_SOURCE_DIR}/doc/kcron.doc
+    COMMAND ${ASCIIDOC} --backend docbook -a "a2x-format=manpage" --doctype manpage --out-file ${PROJECT_BINARY_DIR}/kcron.xml ${PROJECT_SOURCE_DIR}/doc/kcron.doc
     COMMAND ${CMAKE_COMMAND} -E env PYTHONWARNINGS=ignore::SyntaxWarning
             ${A2X} --doctype manpage --format manpage ${PROJECT_BINARY_DIR}/kcron.xml
     DEPENDS ${PROJECT_SOURCE_DIR}/doc/kcron.doc
