@@ -107,6 +107,9 @@ add_compile_options(
   -Wformat-security                   # Format security issues
   -Wstrict-prototypes                 # Require function prototypes
   -Wstrict-overflow                   # Overflow detection
+  -Wvla                               # Variable length arrays are bad
+  -Wshadow                            # Warn on shadowed variables
+  -Walloca                            # Warn on suspicious alloca usage
   -Werror=implicit-function-declaration  # Error on implicit declarations
   -Werror                             # Treat all warnings as errors
 )
@@ -120,6 +123,16 @@ if (UNWIND_TABLES)
 else ()
   message(WARNING "Compiler does not support -fasynchronous-unwind-tables")
 endif (UNWIND_TABLES)
+
+#############################
+# Stack Frame Pointer Support (for debugging)
+CHECK_C_COMPILER_FLAG(-fno-omit-frame-pointer FRAME_POINTER)
+if (FRAME_POINTER)
+  add_compile_options(-fno-omit-frame-pointer)
+  message(STATUS "Frame pointer: enabled")
+else()
+  message(WARNING "Compiler does not support -fno-omit-frame-pointer")
+endif(FRAME_POINTER)
 
 #############################
 # Function Inlining Optimization
@@ -161,7 +174,7 @@ add_link_options(
   -Wl,-z,relro          # Read-only relocations
   -Wl,-z,now            # Resolve all symbols at load time
   -Wl,-z,combreloc      # Combine relocation sections
-  -pie                  # Position independent executable
+  -Wl,--as-needed       # Only link used symbols
 )
 
 #############################
@@ -185,14 +198,13 @@ else()
 endif ()
 
 # Stack Smashing Protection
-add_compile_options(--param=ssp-buffer-size=4)
-
-CHECK_C_COMPILER_FLAG(-fexceptions C_EXCEPTIONS)
-if (C_EXCEPTIONS)
-  add_compile_options(-fexceptions)
-else ()
-  message(FATAL_ERROR "Required compiler flag '-fexceptions' not supported")
-endif (C_EXCEPTIONS)
+CHECK_C_COMPILER_FLAG(-fstack-protector-buffer-size=4 SSP_BUFFER_SIZE)
+if (SSP_BUFFER_SIZE)
+  add_compile_options(-fstack-protector-buffer-size=4)
+  message(STATUS "Stack protector buffer size: set to 4")
+else()
+  message(WARNING "Compiler does not support -fstack-protector-buffer-size=4")
+endif(SSP_BUFFER_SIZE)
 
 CHECK_C_COMPILER_FLAG(-fstack-clash-protection STACK_CLASH)
 if (STACK_CLASH)
