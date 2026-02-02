@@ -110,7 +110,9 @@ int set_kcron_ulimits(void) {
 
   /* Minimal stack size should be sufficient for this simple program */
   long page_size = sysconf(_SC_PAGESIZE);
-  if (page_size < 1024) page_size = 4096; /* fallback to workable size */
+  if (page_size < 1024) {
+    page_size = 4096; /* fallback to workable size */
+  }
   rlim_t min_stack = (rlim_t)page_size * 2u;
   const struct rlimit stack = {min_stack, min_stack};
   if (setrlimit(RLIMIT_STACK, &stack) != 0) {
@@ -156,14 +158,14 @@ int set_kcron_ulimits(void) {
  * Apply comprehensive runtime hardening measures.
  *
  * This function sets up multiple layers of defense:
- * 1. Redirects stdin to /dev/null (prevents input-based attacks)
- * 2. Disables core dumps (prevents memory disclosure)
- * 3. Sets no_new_privs (prevents privilege escalation via execve)
- * 4. Clears environment variables (prevents LD_PRELOAD and similar attacks)
- * 5. Sets restrictive ulimits (resource exhaustion prevention)
- * 6. Enables landlock (filesystem access control)
- * 7. Enables seccomp (syscall filtering)
- * 8. Drops capabilities (privilege minimization)
+ * - Redirects stdin to /dev/null (prevents input-based attacks)
+ * - Disables core dumps (prevents memory disclosure)
+ * - Sets no_new_privs (prevents privilege escalation via execve)
+ * - Clears environment variables (prevents LD_PRELOAD and similar attacks)
+ * - Sets restrictive ulimits (resource exhaustion prevention)
+ * - Enables landlock (filesystem access control)
+ * - Enables seccomp (syscall filtering)
+ * - Drops capabilities (privilege minimization)
  *
  * Exits on any failure - hardening is mandatory, not optional.
  *
@@ -193,13 +195,7 @@ void harden_runtime(void) {
     exit(EXIT_FAILURE);
   }
 
-  /*
-   * Clear all environment variables to prevent:
-   * - LD_PRELOAD attacks
-   * - LD_LIBRARY_PATH attacks
-   * - Locale-based attacks
-   * - Any other environment-dependent behavior
-   */
+  /* Clear all environment variables to prevent environment-dependent behavior */
   if (clearenv() != 0) {
     (void)fprintf(stderr, "%s: Cannot clear environment variables: %s\n", __PROGRAM_NAME, strerror(errno));
     exit(EXIT_FAILURE);
