@@ -109,11 +109,12 @@ void set_kcron_landlock(void) {
                                    LANDLOCK_ACCESS_FS_MAKE_SYM;
 
   /* Set allowed operations for the keytab directory */
-  path_beneath.allowed_access = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_MAKE_DIR | LANDLOCK_ACCESS_FS_MAKE_REG;
+  path_beneath.allowed_access = LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_MAKE_DIR | LANDLOCK_ACCESS_FS_MAKE_REG;
 
   /* ABI v2 - Add file renaming/linking control */
   if (landlock_abi >= 2) {
     ruleset_attr.handled_access_fs |= LANDLOCK_ACCESS_FS_REFER;
+    path_beneath.allowed_access |= LANDLOCK_ACCESS_FS_REFER;
   }
 
   /* ABI v3 - Add file truncation control */
@@ -162,9 +163,10 @@ void set_kcron_landlock(void) {
    * Open the parent directory with:
    * - O_RDONLY: Read-only access
    * - O_NOFOLLOW: Don't follow symlinks (security)
+   * - O_DIRECTORY: Must be a directory
    * - O_CLOEXEC: Close on exec (defense in depth)
    */
-  parent_fd = open(dirname(client_keytab_parent), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  parent_fd = open(dirname(client_keytab_parent), O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC);
   if (parent_fd < 0) {
     (void)fprintf(stderr, "%s: Landlock cannot open parent directory %s: %s\n", __PROGRAM_NAME, client_keytab_parent, strerror(errno));
     (void)free(client_keytab_parent);
