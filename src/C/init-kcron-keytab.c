@@ -69,11 +69,7 @@
 
 static inline int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mode) __attribute__((access(read_only, 1))) __attribute__((warn_unused_result));
 static inline int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mode_t mode) {
-#if USE_CAPABILITIES == 1
   const cap_value_t caps[] = {CAP_CHOWN, CAP_DAC_OVERRIDE};
-#else
-  const cap_value_t caps[] = {-1};
-#endif
   const int num_caps = sizeof(caps) / sizeof(cap_value_t);
 
   struct stat st = {0};
@@ -166,11 +162,7 @@ static inline int mkdir_if_missing(const char *dir, uid_t owner, gid_t group, mo
 static inline int chown_chmod_keytab(int filedescriptor, const char *keytab) __attribute__((access(read_only, 2))) __attribute__((warn_unused_result));
 static inline int chown_chmod_keytab(int filedescriptor, const char *keytab) {
 
-#if USE_CAPABILITIES == 1
   const cap_value_t keytab_caps[] = {CAP_CHOWN, CAP_DAC_OVERRIDE};
-#else
-  const cap_value_t keytab_caps[] = {-1};
-#endif
   const int num_caps = sizeof(keytab_caps) / sizeof(cap_value_t);
 
   const uid_t uid = getuid();
@@ -283,11 +275,7 @@ static int create_keytab_file(const char *keytab_dirname, const char *keytab_fil
   DIR *keytab_dir = NULL;
   int filedescriptor = -1;
 
-#if USE_CAPABILITIES == 1
   const cap_value_t caps[] = {CAP_DAC_OVERRIDE};
-#else
-  const cap_value_t caps[] = {-1};
-#endif
   const int num_caps = sizeof(caps) / sizeof(cap_value_t);
 
   /* Validate non-null input pointers */
@@ -404,11 +392,7 @@ void constructor(void) {
 int main(void) {
   struct stat st = {0};
 
-#if USE_CAPABILITIES == 1
   const cap_value_t caps[] = {CAP_DAC_OVERRIDE};
-#else
-  const cap_value_t caps[] = {-1};
-#endif
   const int num_caps = sizeof(caps) / sizeof(cap_value_t);
 
   const uid_t uid = getuid();
