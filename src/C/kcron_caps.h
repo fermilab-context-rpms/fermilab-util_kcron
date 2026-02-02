@@ -70,13 +70,6 @@ void disable_capabilities(void) {
     exit(EXIT_FAILURE);
   }
 
-  /* Apply the cleared capability set to the current process */
-  if (cap_set_proc(capabilities) != 0) {
-    (void)cap_free(capabilities);
-    (void)fprintf(stderr, "%s: Unable to apply cleared CAPABILITIES\n", __PROGRAM_NAME);
-    exit(EXIT_FAILURE);
-  }
-
   (void)cap_free(capabilities);
 }
 
