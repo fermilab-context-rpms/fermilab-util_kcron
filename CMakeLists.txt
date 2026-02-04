@@ -4,6 +4,15 @@ project(kcron C)
 
 set(LANGUAGES "C")
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+        "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE
+    )
+    message(STATUS "Build type not specified, defaulting to RelWithDebInfo")
+endif()
+
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
 execute_process(COMMAND git describe --abbrev=0 OUTPUT_VARIABLE VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 ####

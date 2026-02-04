@@ -200,15 +200,6 @@ add_link_options(
 )
 
 #############################
-# Build Type Configuration
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
-    message(STATUS "Build type not specified, defaulting to RELWITHDEBINFO")
-endif(NOT CMAKE_BUILD_TYPE)
-
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-
-#############################
 # Compiler Hardening Flags
 
 # Fortify Source (only works with optimization enabled)
