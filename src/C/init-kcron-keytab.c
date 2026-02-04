@@ -223,22 +223,6 @@ static inline int chown_chmod_keytab(int filedescriptor, const char *keytab) {
   return 0;
 }
 
-static inline void free_buffers(char *keytab, char *keytab_dirname, char *keytab_filename, char *client_keytab_dirname);
-static inline void free_buffers(char *keytab, char *keytab_dirname, char *keytab_filename, char *client_keytab_dirname) {
-  if (keytab != NULL) {
-    (void)free(keytab);
-  }
-  if (keytab_dirname != NULL) {
-    (void)free(keytab_dirname);
-  }
-  if (keytab_filename != NULL) {
-    (void)free(keytab_filename);
-  }
-  if (client_keytab_dirname != NULL) {
-    (void)free(client_keytab_dirname);
-  }
-}
-
 static int validate_client_dirname(char *client_keytab_dirname) __attribute__((warn_unused_result));
 static int validate_client_dirname(char *client_keytab_dirname) {
   struct stat lst = {0};
@@ -404,38 +388,56 @@ int main(void) {
   char *client_keytab_dirname = calloc(FILE_PATH_MAX_LENGTH + 3, sizeof(char));
 
   if ((keytab == NULL) || (keytab_dirname == NULL) || (keytab_filename == NULL) || (client_keytab_dirname == NULL)) {
-    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Unable to allocate memory.\n", __PROGRAM_NAME);
+    (void)free(keytab);
+    (void)free(keytab_dirname);
+    (void)free(keytab_filename);
+    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
   if (get_client_dirname(client_keytab_dirname) != 0) {
-    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Client keytab directory not set.\n", __PROGRAM_NAME);
+    (void)free(keytab);
+    (void)free(keytab_dirname);
+    (void)free(keytab_filename);
+    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
   if (validate_client_dirname(client_keytab_dirname) != 0) {
-    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
+    (void)free(keytab);
+    (void)free(keytab_dirname);
+    (void)free(keytab_filename);
+    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
   if (get_filenames(keytab_dirname, keytab_filename, keytab) != 0) {
-    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Cannot determine keytab filename.\n", __PROGRAM_NAME);
+    (void)free(keytab);
+    (void)free(keytab_dirname);
+    (void)free(keytab_filename);
+    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
   if (mkdir_if_missing(keytab_dirname, uid, gid, _0700) != 0) {
-    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Cannot make dir %s.\n", __PROGRAM_NAME, keytab_dirname);
+    (void)free(keytab);
+    (void)free(keytab_dirname);
+    (void)free(keytab_filename);
+    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
   /* use of CAP_DAC_OVERRIDE as we may not be able to chdir otherwise   */
   if (enable_capabilities(caps, num_caps) != 0) {
-    (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
     (void)fprintf(stderr, "%s: Cannot enable capabilities.\n", __PROGRAM_NAME);
+    (void)free(keytab);
+    (void)free(keytab_dirname);
+    (void)free(keytab_filename);
+    (void)free(client_keytab_dirname);
     exit(EXIT_FAILURE);
   }
 
@@ -446,14 +448,20 @@ int main(void) {
   /* create keytab if missing */
   if (stat_code == -1) {
     if (create_keytab_file(keytab_dirname, keytab_filename, keytab) != 0) {
-      (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
+      (void)free(keytab);
+      (void)free(keytab_dirname);
+      (void)free(keytab_filename);
+      (void)free(client_keytab_dirname);
       exit(EXIT_FAILURE);
     }
   }
 
   (void)printf("%s\n", keytab);
 
-  (void)free_buffers(keytab, keytab_dirname, keytab_filename, client_keytab_dirname);
+  (void)free(keytab);
+  (void)free(keytab_dirname);
+  (void)free(keytab_filename);
+  (void)free(client_keytab_dirname);
 
   exit(EXIT_SUCCESS);
 }

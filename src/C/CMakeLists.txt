@@ -99,20 +99,42 @@ endif(IPO_RESULT)
 # Required Compiler Warnings
 # These warnings help catch common security issues and bugs
 add_compile_options(
-  -Wall                               # Enable most warnings
-  -Wextra                             # Enable extra warnings
-  -Wpedantic                          # ISO C conformance warnings
-  -Wconversion                        # Implicit conversion warnings
-  -Wformat                            # Format string warnings
-  -Wformat-security                   # Format security issues
-  -Wstrict-prototypes                 # Require function prototypes
-  -Wstrict-overflow                   # Overflow detection
-  -Wvla                               # Variable length arrays are bad
-  -Wshadow                            # Warn on shadowed variables
-  -Walloca                            # Warn on suspicious alloca usage
+  -Wall                                  # Enable most warnings
+  -Wextra                                # Enable extra warnings
+  -Wpedantic                             # ISO C conformance warnings
+  -Wconversion                           # Implicit conversion warnings
+  -Wsign-conversion                      # Sign conversion warnings
+  -Wformat=2                             # Enhanced format string warnings
+  -Wformat-security                      # Format security issues
+  -Wstrict-prototypes                    # Require function prototypes
+  -Wstrict-overflow=2                    # Overflow detection (level 2)
+  -Wvla                                  # Variable length arrays discouraged
+  -Wshadow                               # Warn on shadowed variables
+  -Walloca                               # Warn on suspicious alloca usage
+  -Wcast-qual                            # Warn on cast removing const/volatile
+  -Wcast-align                           # Warn on alignment-affecting casts
+  -Wwrite-strings                        # String literals are const
+  -Wundef                                # Undefined macro in #if
+  -Wmissing-prototypes                   # Missing function prototypes
+  -Wmissing-declarations                 # Missing declarations
+  -Wredundant-decls                      # Redundant declarations
+  -Wnested-externs                       # Nested extern declarations
+  -Winline                               # Inline function can't be inlined
+  -Wdisabled-optimization                # Optimization disabled
   -Werror=implicit-function-declaration  # Error on implicit declarations
-  -Werror                             # Treat all warnings as errors
+  -Werror                                # Treat all warnings as errors
 )
+
+# Additional warnings for GCC (not supported by all compilers)
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(
+        -Wlogical-op                       # Suspicious logical operations
+        -Wduplicated-cond                  # Duplicated conditions
+        -Wduplicated-branches              # Duplicated branches
+        -Wnull-dereference                 # Potential NULL dereferences
+        -Wjump-misses-init                 # Jump skips variable initialization
+    )
+endif()
 
 #############################
 # Stack Unwinding Support (for debugging)
