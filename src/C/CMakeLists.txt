@@ -125,6 +125,9 @@ add_compile_options(
   -Werror                                # Treat all warnings as errors
 )
 
+# Additional hardening for formats
+add_compile_options(-D_GLIBCXX_ASSERTIONS)
+
 # Additional warnings for GCC (not supported by all compilers)
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     add_compile_options(
