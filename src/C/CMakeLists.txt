@@ -17,12 +17,12 @@ include(GNUInstallDirs)
 if (NOT CLIENT_KEYTAB_DIR)
   set(CLIENT_KEYTAB_DIR /var/kerberos/krb5/user)
   cmake_print_variables(CLIENT_KEYTAB_DIR)
-endif (NOT CLIENT_KEYTAB_DIR)
+endif(NOT CLIENT_KEYTAB_DIR)
 
 if (NOT FILE_PATH_MAX_LENGTH)
   set(FILE_PATH_MAX_LENGTH 4096)
   cmake_print_variables(FILE_PATH_MAX_LENGTH)
-endif (NOT FILE_PATH_MAX_LENGTH)
+endif(NOT FILE_PATH_MAX_LENGTH)
 
 #############################
 # C Language Configuration
@@ -36,7 +36,7 @@ set(CMAKE_C_EXTENSIONS ON)
 CHECK_C_SOURCE_COMPILES("int main(void) { return 0; } " CAN_COMPILE)
 if (NOT CAN_COMPILE)
   message(FATAL_ERROR "C compiler is non-functional")
-endif (NOT CAN_COMPILE)
+endif(NOT CAN_COMPILE)
 
 message(STATUS "C Compiler: ${CMAKE_C_COMPILER}")
 message(STATUS "C Standard: C${CMAKE_C_STANDARD}")
@@ -48,7 +48,7 @@ message(STATUS "Supported C features: ${CMAKE_C_COMPILE_FEATURES}")
 CHECK_INCLUDE_FILE(sys/capability.h HAVE_CAPABILITIES_H)
 if (NOT HAVE_CAPABILITIES_H)
   message(FATAL_ERROR "sys/capability.h is REQUIRED - install libcap-dev or libcap-devel")
-endif (NOT HAVE_CAPABILITIES_H)
+endif(NOT HAVE_CAPABILITIES_H)
 
 #############################
 # Optional Security Features
@@ -59,8 +59,8 @@ if (USE_LANDLOCK)
   if (NOT HAVE_LANDLOCK_H)
     message(FATAL_ERROR "linux/landlock.h not found - landlock support requested")
     set(USE_LANDLOCK FALSE)
-  endif (NOT HAVE_LANDLOCK_H)
-endif (USE_LANDLOCK)
+  endif(NOT HAVE_LANDLOCK_H)
+endif(USE_LANDLOCK)
 add_feature_info(WITH_LANDLOCK USE_LANDLOCK "Use landlock to reduce privilege exposure")
 
 option (USE_SECCOMP "Add seccomp filters for binaries" TRUE)
@@ -69,8 +69,8 @@ if (USE_SECCOMP)
   if (NOT HAVE_SECCOMP_H)
     message(FATAL_ERROR "seccomp.h not found - seccomp support requested")
     set(USE_SECCOMP FALSE)
-  endif (NOT HAVE_SECCOMP_H)
-endif (USE_SECCOMP)
+  endif(NOT HAVE_SECCOMP_H)
+endif(USE_SECCOMP)
 add_feature_info(WITH_SECCOMP USE_SECCOMP "Add seccomp filters for binaries")
 
 #############################
@@ -128,7 +128,7 @@ add_compile_options(
 # Additional hardening for formats
 add_compile_options(-D_GLIBCXX_ASSERTIONS)
 
-# Additional warnings for GCC (not supported by all compilers)
+# Additional GCC features (not supported by all compilers)
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     add_compile_options(
         -Wlogical-op                       # Suspicious logical operations
@@ -137,20 +137,36 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
         -Wnull-dereference                 # Potential NULL dereferences
         -Wjump-misses-init                 # Jump skips variable initialization
     )
-endif()
+
+  check_c_compiler_flag(-fplugin=annobin SET_ANNOBIN)
+  if(SET_ANNOBIN)
+    add_compile_options(-fplugin=annobin)
+    message(STATUS "GCC Annobin plugin: enabled")
+  else()
+    message(WARNING "GCC Annobin plugin not available")
+  endif(SET_ANNOBIN)
+
+  check_c_compiler_flag(-grecord-gcc-switches SET_GCC_SWITCHES)
+  if(SET_GCC_SWITCHES)
+    add_compile_options(-grecord-gcc-switches)
+    message(STATUS "Recording GCC switches: enabled")
+  else()
+    message(WARNING "Cannot record GCC switches in binary")
+  endif(SET_GCC_SWITCHES)
+endif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
 
 #############################
-# Stack Unwinding Support (for debugging)
+# Stack Unwinding Support (required for debugging)
 CHECK_C_COMPILER_FLAG(-fasynchronous-unwind-tables UNWIND_TABLES)
 if (UNWIND_TABLES)
   add_compile_options(-fasynchronous-unwind-tables)
   message(STATUS "Unwind tables: enabled")
 else ()
   message(WARNING "Compiler does not support -fasynchronous-unwind-tables")
-endif (UNWIND_TABLES)
+endif(UNWIND_TABLES)
 
 #############################
-# Stack Frame Pointer Support (for debugging)
+# Stack Frame Pointer Support (required for debugging)
 CHECK_C_COMPILER_FLAG(-fno-omit-frame-pointer FRAME_POINTER)
 if (FRAME_POINTER)
   add_compile_options(-fno-omit-frame-pointer)
@@ -164,42 +180,24 @@ endif(FRAME_POINTER)
 CHECK_C_COMPILER_FLAG(-finline-functions INLINE_FUNCTIONS)
 if (INLINE_FUNCTIONS)
   add_compile_options(-finline-functions)
-  message(STATUS "Inline functions: enabled")
+  message(STATUS "Aggressibe inline functions: enabled")
 else ()
   message(WARNING "Compiler does not support -finline-functions")
-endif (INLINE_FUNCTIONS)
-
-#############################
-# Binary Annotation (GCC-specific)
-if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
-  CHECK_C_COMPILER_FLAG(-fplugin=annobin SET_ANNOBIN)
-  if (SET_ANNOBIN)
-    add_compile_options(-fplugin=annobin)
-    message(STATUS "Annobin plugin: enabled")
-  else ()
-    message(WARNING "Annobin plugin not available")
-  endif (SET_ANNOBIN)
-
-  CHECK_C_COMPILER_FLAG(-grecord-gcc-switches SET_GCC_SWITCHES)
-  if (SET_GCC_SWITCHES)
-    add_compile_options(-grecord-gcc-switches)
-    message(STATUS "Recording GCC switches: enabled")
-  else ()
-    message(WARNING "Cannot record GCC switches in binary")
-  endif (SET_GCC_SWITCHES)
-endif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+endif(INLINE_FUNCTIONS)
 
 #############################
 # Linker Hardening Flags
 # These flags prevent various exploit techniques
 # -Wl,-z,defs  -- doesn't work with modern RHEL
 add_link_options(
+  -Wl,--as-needed       # Only link used symbols
   -Wl,-z,noexecstack    # Mark stack as non-executable
   -Wl,-z,nodump         # Prevent dumping
   -Wl,-z,relro          # Read-only relocations
   -Wl,-z,now            # Resolve all symbols at load time
   -Wl,-z,combreloc      # Combine relocation sections
-  -Wl,--as-needed       # Only link used symbols
+  -Wl,-z,ibt            # Fail at runtime if ibt fails
+  -Wl,-z,shstk          # Fail at runtime if no shadow stack
 )
 
 #############################
@@ -211,74 +209,57 @@ if (NOT CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     message(STATUS "Fortify source: enabled")
 else()
     message(STATUS "Fortify source: disabled (debug build)")
-endif ()
+endif(NOT CMAKE_BUILD_TYPE STREQUAL "DEBUG")
 
-# Stack Smashing Protection
-CHECK_C_COMPILER_FLAG(-fstack-protector-buffer-size=4 SSP_BUFFER_SIZE)
-if (SSP_BUFFER_SIZE)
-  add_compile_options(-fstack-protector-buffer-size=4)
-  message(STATUS "Stack protector buffer size: set to 4")
+# Stack protector: ALL
+check_c_compiler_flag(-fstack-protector-all HAVE_SSP_ALL)
+if (HAVE_SSP_ALL)
+  add_compile_options(-fstack-protector-all)
 else()
-  message(WARNING "Compiler does not support -fstack-protector-buffer-size=4")
-endif(SSP_BUFFER_SIZE)
+  message(FATAL_ERROR "Required flag -fstack-protector-all not supported")
+endif(HAVE_SSP_ALL)
 
+# Stack clash protection
 CHECK_C_COMPILER_FLAG(-fstack-clash-protection STACK_CLASH)
 if (STACK_CLASH)
   add_compile_options(-fstack-clash-protection)
   message(STATUS "Stack clash protection: enabled")
 else ()
   message(WARNING "Stack clash protection not supported by compiler")
-endif (STACK_CLASH)
+endif(STACK_CLASH)
 
+# Disable stack slot reuse
 CHECK_C_COMPILER_FLAG(-fstack-reuse=none STACK_REUSE)
 if (STACK_REUSE)
   add_compile_options(-fstack-reuse=none)
 else ()
   message(FATAL_ERROR "Required compiler flag '-fstack-reuse=none' not supported")
-endif (STACK_REUSE)
+endif(STACK_REUSE)
 
-CHECK_C_COMPILER_FLAG(-fstack-protector-all STACK_PROTECT)
-if (STACK_PROTECT)
-  add_compile_options(-fstack-protector-all)
-else ()
-  message(FATAL_ERROR "Required compiler flag '-fstack-protector-all' not supported")
-endif (STACK_PROTECT)
-
-# Control Flow Enforcement Technology (Intel CET)
-CHECK_C_COMPILER_FLAG(-fcf-protection=full FCF_PROTECT)
-if (FCF_PROTECT)
-  add_compile_options(-fcf-protection=full)
-  message(STATUS "Control flow protection: enabled")
-else ()
-  message(WARNING "Control flow protection not supported by compiler")
-endif (FCF_PROTECT)
-
-# Branch Target Identification (ARM BTI)
-CHECK_C_COMPILER_FLAG(-mbranch-protection=standard BRANCH_PROTECT)
-if (BRANCH_PROTECT)
-  add_compile_options(-mbranch-protection=standard)
-  message(STATUS "Branch protection (ARM): enabled")
-else ()
-  message(STATUS "Branch protection (ARM): not applicable for this architecture")
-endif (BRANCH_PROTECT)
-
-# Zero Call-Used Registers on Return
-CHECK_C_COMPILER_FLAG(-fzero-call-used-regs=all ZERO_CALL_REGS)
-if (ZERO_CALL_REGS)
+# Zero call-used registers on return
+check_c_compiler_flag(-fzero-call-used-regs=all HAVE_ZERO_CALL_REGS)
+if (HAVE_ZERO_CALL_REGS)
   add_compile_options(-fzero-call-used-regs=all)
-  message(STATUS "Zero call-used registers: enabled")
-else ()
-  message(WARNING "Zero call-used registers not supported by compiler")
-endif (ZERO_CALL_REGS)
+endif(HAVE_ZERO_CALL_REGS)
 
-# Shadow Stack (Intel CET-SS)
-CHECK_C_COMPILER_FLAG(-mshstk SAFESTACK_SHADOW)
-if (SAFESTACK_SHADOW)
-  add_compile_options(-mshstk)
-  message(STATUS "Shadow stack: enabled")
-else ()
-  message(STATUS "Shadow stack: not supported by this CPU/compiler")
-endif (SAFESTACK_SHADOW)
+# Control-flow enforcement
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+  # x86_64
+  check_c_compiler_flag(-fcf-protection=full HAVE_CET)
+  if (HAVE_CET)
+    add_compile_options(-fcf-protection=full)
+  else()
+    message(FATAL_ERROR "Intel CET (-fcf-protection=full) required on x86_64")
+  endif(HAVE_CET)
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  # ARM
+  check_c_compiler_flag(-mbranch-protection=standard HAVE_BTI)
+  if (HAVE_BTI)
+    add_compile_options(-mbranch-protection=standard)
+  else()
+    message(FATAL_ERROR "Branch Protection (-mbranch-protection=standard) required on aarch64")
+  endif(HAVE_BTI)
+endif()
 
 #############################
 # Build Targets
@@ -316,7 +297,7 @@ target_link_libraries(init-kcron-keytab PRIVATE cap)
 
 if (USE_SECCOMP)
   target_link_libraries(init-kcron-keytab PRIVATE seccomp)
-endif (USE_SECCOMP)
+endif(USE_SECCOMP)
 
 #############################
 # client-keytab-name Target Configuration
